@@ -87,7 +87,8 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black flex items-center justify-center">
       <div className="w-full min-h-screen flex items-center justify-center sm:block">
-        <div className="relative w-full sm:max-w-[430px] min-h-screen sm:rounded-3xl sm:shadow-2xl bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden mx-auto flex flex-col" style={{paddingBottom: 'env(safe-area-inset-bottom)'}}>
+        <div className="relative w-full max-w-full min-h-screen bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden mx-auto flex flex-col md:rounded-none md:shadow-none md:max-w-none md:overflow-visible
+          sm:max-w-[430px] sm:rounded-3xl sm:shadow-2xl sm:overflow-hidden" style={{paddingBottom: 'env(safe-area-inset-bottom)'}}>
           <AuthRedirect />
           <div className="container mx-auto px-2 sm:px-4 py-8 sm:py-16 flex-1 flex flex-col">
             {/* Hero Section */}
