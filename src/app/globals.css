@@ -17,10 +17,28 @@
     --background: #0a0a0a;
     --foreground: #ededed;
   }
+  .cl-socialButtonsIcon[data-provider="apple"] {
+    color: #fff !important;
+    fill: #fff !important;
+  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@media (max-width: 640px) {
+  .cl-card {
+    max-width: 100vw !important;
+    width: 100vw !important;
+    min-width: 0 !important;
+    border-radius: 0 !important;
+    padding: 1rem !important;
+  }
+  .cl-modal {
+    align-items: flex-start !important;
+    padding-top: 2rem !important;
+  }
 }
