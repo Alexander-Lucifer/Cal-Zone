@@ -19,6 +19,9 @@ export function LogMealModal({ isOpen, onClose, onLogMeal }: LogMealModalProps) 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!mealData.name || mealData.calories <= 0) {
+      return;
+    }
     onLogMeal({
       ...mealData,
       id: '', // This will be set by the parent component
@@ -85,8 +88,13 @@ export function LogMealModal({ isOpen, onClose, onLogMeal }: LogMealModalProps) 
                   </label>
                   <input
                     type="number"
-                    value={mealData.calories}
-                    onChange={(e) => setMealData({ ...mealData, calories: parseInt(e.target.value) })}
+                    value={mealData.calories || ''}
+                    onChange={(e) => {
+                      const value = e.target.value === '' ? 0 : parseInt(e.target.value);
+                      if (!isNaN(value)) {
+                        setMealData({ ...mealData, calories: value });
+                      }
+                    }}
                     min="0"
                     required
                     className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
