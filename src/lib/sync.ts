@@ -92,7 +92,7 @@ export function useSyncedData() {
 
     try {
       console.log(`Fetching key ${key} for user ${userId}`);
-      const response = await fetch(`/api/sync?userId=${userId}&key=${key}`);
+      const response = await fetch(`/api/sync?key=${key}`);
 
       if (!response.ok) {
         console.error(`Failed to fetch ${key}:`, response.status);
@@ -124,7 +124,7 @@ export function useSyncedData() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userId, key, data }),
+        body: JSON.stringify({ key, data }),
       });
 
       if (!response.ok) {
@@ -135,18 +135,24 @@ export function useSyncedData() {
     } catch (err) {
       console.error(`Error syncing ${key}:`, err);
       setError(err instanceof Error ? err : new Error('Unknown error occurred'));
+      throw err; // Re-throw to handle in the component
     }
   }, [userId]);
 
-  // Effect to load data from Supabase on mount
+  // Effect to load data from Supabase on mount and poll for updates
   useEffect(() => {
+    let isMounted = true;
+
     const loadData = async () => {
       if (!userId) {
-          setIsLoading(false);
-          return;
+        setIsLoading(false);
+        return;
       }
-      setIsLoading(true);
-      setError(null);
+      
+      if (isMounted) {
+        setIsLoading(true);
+        setError(null);
+      }
 
       try {
         // Fetch all keys in parallel
@@ -157,30 +163,57 @@ export function useSyncedData() {
           fetchData('goalsAchieved') as Promise<number | null>,
         ]);
 
-        setSyncedData({
-          settings: settings || DEFAULT_SETTINGS,
-          meals: meals || [],
-          streak: streak || DEFAULT_STREAK_DATA,
-          goalsAchieved: goalsAchieved || 0,
-        });
-
-      } catch {
-        // Error is already set in fetchData
+        if (isMounted) {
+          setSyncedData({
+            settings: settings || DEFAULT_SETTINGS,
+            meals: meals || [],
+            streak: streak || DEFAULT_STREAK_DATA,
+            goalsAchieved: goalsAchieved || 0,
+          });
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err instanceof Error ? err : new Error('Unknown error occurred'));
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
+    // Initial load
     loadData();
-  }, [userId, fetchData]); // Depend on userId and fetchData
+
+    // Set up polling every 5 seconds
+    const pollInterval: NodeJS.Timeout = setInterval(loadData, 5000);
+
+    // Cleanup
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [userId, fetchData]);
 
   // Function to update and sync data for a specific key
   const updateSyncedData = useCallback(async <K extends SyncedDataKeys>(key: K, data: SyncedData[K]) => {
-      setSyncedData(prevData => ({
-          ...prevData,
-          [key]: data,
-      }));
+    // Optimistically update local state
+    setSyncedData(prevData => ({
+      ...prevData,
+      [key]: data,
+    }));
+
+    try {
+      // Sync with server
       await syncKey(key, data);
+    } catch (err) {
+      // Revert on error
+      setSyncedData(prevData => ({
+        ...prevData,
+        [key]: prevData[key],
+      }));
+      throw err;
+    }
   }, [syncKey]);
 
   return {
