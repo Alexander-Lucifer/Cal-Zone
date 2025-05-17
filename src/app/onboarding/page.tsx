@@ -3,18 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useSyncedData, UserSettings } from "@/lib/sync";
+import { useSyncedData } from "@/lib/sync";
+import { toast } from "sonner";
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { syncedData, updateSyncedData } = useSyncedData();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
-
-  const { data: settings, updateData: updateSettings } = useSyncedData<UserSettings>('userSettings', {
-    nickname: '',
-    dailyCalorieGoal: 2000,
-    streakGoal: 7,
-  });
 
   const steps = [
     {
@@ -23,12 +19,12 @@ export default function OnboardingPage() {
         <input
           className="w-full p-3 rounded-lg border border-gray-700 bg-gray-900 text-white focus:outline-none focus:border-blue-500"
           placeholder="e.g. Alex"
-          value={settings.nickname}
-          onChange={e => updateSettings({ ...settings, nickname: e.target.value })}
+          value={syncedData.settings.nickname}
+          onChange={e => updateSyncedData('settings', { ...syncedData.settings, nickname: e.target.value })}
           autoFocus
         />
       ),
-      canContinue: settings.nickname.trim().length > 0,
+      canContinue: syncedData.settings.nickname.trim().length > 0,
     },
     {
       label: "What's your daily calorie goal?",
@@ -36,14 +32,14 @@ export default function OnboardingPage() {
         <input
           type="number"
           className="w-full p-3 rounded-lg border border-gray-700 bg-gray-900 text-white focus:outline-none focus:border-blue-500"
-          value={settings.dailyCalorieGoal}
+          value={syncedData.settings.dailyCalorieGoal}
           min={1000}
           max={5000}
           step={50}
-          onChange={e => updateSettings({ ...settings, dailyCalorieGoal: Number(e.target.value) })}
+          onChange={e => updateSyncedData('settings', { ...syncedData.settings, dailyCalorieGoal: Number(e.target.value) })}
         />
       ),
-      canContinue: settings.dailyCalorieGoal >= 1000 && settings.dailyCalorieGoal <= 5000,
+      canContinue: syncedData.settings.dailyCalorieGoal >= 1000 && syncedData.settings.dailyCalorieGoal <= 5000,
     },
     {
       label: "What's your streak goal?",
@@ -51,14 +47,14 @@ export default function OnboardingPage() {
         <input
           type="number"
           className="w-full p-3 rounded-lg border border-gray-700 bg-gray-900 text-white focus:outline-none focus:border-blue-500"
-          value={settings.streakGoal}
+          value={syncedData.settings.streakGoal}
           min={3}
           max={30}
           step={1}
-          onChange={e => updateSettings({ ...settings, streakGoal: Number(e.target.value) })}
+          onChange={e => updateSyncedData('settings', { ...syncedData.settings, streakGoal: Number(e.target.value) })}
         />
       ),
-      canContinue: settings.streakGoal >= 3 && settings.streakGoal <= 30,
+      canContinue: syncedData.settings.streakGoal >= 3 && syncedData.settings.streakGoal <= 30,
     },
   ];
 
@@ -67,15 +63,24 @@ export default function OnboardingPage() {
       setStep(step + 1);
     } else {
       setLoading(true);
-      await updateSettings(settings);
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 800);
+      try {
+        await updateSyncedData('settings', {
+          nickname: syncedData.settings.nickname,
+          dailyCalorieGoal: syncedData.settings.dailyCalorieGoal,
+          streakGoal: syncedData.settings.streakGoal,
+        });
+        toast.success('Settings saved!');
+        router.push('/dashboard');
+      } catch {
+        toast.error('Failed to save settings');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
   // If already onboarded, redirect
-  if (typeof window !== "undefined" && settings.nickname) {
+  if (typeof window !== "undefined" && syncedData.settings.nickname) {
     router.replace("/dashboard");
     return null;
   }

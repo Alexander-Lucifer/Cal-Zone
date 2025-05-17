@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import { MealData } from '@/lib/sync';
 
 interface LogMealModalProps {
   isOpen: boolean;
@@ -10,29 +11,22 @@ interface LogMealModalProps {
   onLogMeal: (mealData: MealData) => void;
 }
 
-export interface MealData {
-  name: string;
-  calories: number;
-  time: string;
-  type: 'breakfast' | 'lunch' | 'dinner' | 'snack';
-}
-
 export function LogMealModal({ isOpen, onClose, onLogMeal }: LogMealModalProps) {
-  const [mealData, setMealData] = useState<MealData>({
+  const [mealData, setMealData] = useState<Omit<MealData, 'id' | 'timestamp'>>({
     name: '',
     calories: 0,
-    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-    type: 'breakfast',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onLogMeal(mealData);
+    onLogMeal({
+      ...mealData,
+      id: '', // This will be set by the parent component
+      timestamp: Date.now(),
+    });
     setMealData({
       name: '',
       calories: 0,
-      time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-      type: 'breakfast',
     });
     onClose();
   };
@@ -97,36 +91,6 @@ export function LogMealModal({ isOpen, onClose, onLogMeal }: LogMealModalProps) 
                     required
                     className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">
-                    Time
-                  </label>
-                  <input
-                    type="time"
-                    value={mealData.time}
-                    onChange={(e) => setMealData({ ...mealData, time: e.target.value })}
-                    required
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">
-                    Meal Type
-                  </label>
-                  <select
-                    value={mealData.type}
-                    onChange={(e) => setMealData({ ...mealData, type: e.target.value as MealData['type'] })}
-                    required
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="breakfast">Breakfast</option>
-                    <option value="lunch">Lunch</option>
-                    <option value="dinner">Dinner</option>
-                    <option value="snack">Snack</option>
-                  </select>
                 </div>
 
                 <button

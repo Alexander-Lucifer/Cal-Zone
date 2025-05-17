@@ -1,68 +1,88 @@
 import { auth } from '@clerk/nextjs/server';
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
+import { supabase } from '@/lib/supabase'; // Import the Supabase client
 
-export async function GET(request: Request) {
+interface SupabaseData {
+  [key: string]: unknown;
+}
+
+export async function GET(req: NextRequest) {
   const session = await auth();
-  const { searchParams } = new URL(request.url);
-  const key = searchParams.get('key');
 
-  if (!session?.userId || !key) {
-    return new NextResponse('Unauthorized', { status: 401 });
+  if (!session || !session.userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const key = searchParams.get('key'); // This key will now correspond to the column name in Supabase
+
+  if (!key) {
+    return NextResponse.json({ error: 'Missing key parameter' }, { status: 400 });
   }
 
   try {
-    // Get user metadata from Clerk
-    const response = await fetch(`https://api.clerk.dev/v1/users/${session.userId}/metadata`, {
-      headers: {
-        'Authorization': `Bearer ${process.env.CLERK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    // Fetch data from Supabase for the specific user and key
+    console.log(`Fetching data from Supabase for user ${session.userId}, key: ${key}`);
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch user metadata');
+    const { data, error } = await supabase
+      .from('user_data') // Your Supabase table name
+      .select(key)       // Select the specific column
+      .eq('user_id', session.userId) // Filter by Clerk user ID
+      .single(); // Expecting a single row
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found (which is okay if it's a new user)
+      console.error('Error fetching data from Supabase:', error);
+      throw new Error('Failed to fetch data from Supabase');
     }
 
-    const { public_metadata } = await response.json();
-    const data = public_metadata[key];
+    // Return the value of the specific key, or null if no data was found
+    return NextResponse.json(((data as unknown) as SupabaseData)?.[key] || null);
 
-    return NextResponse.json({ data });
   } catch (error) {
-    console.error('Error fetching synced data:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    console.error('Error in GET /api/sync:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   const session = await auth();
-  const { key, data } = await request.json();
 
-  if (!session?.userId || !key) {
-    return new NextResponse('Unauthorized', { status: 401 });
+  if (!session || !session.userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    // Update user metadata in Clerk
-    const response = await fetch(`https://api.clerk.dev/v1/users/${session.userId}/metadata`, {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${process.env.CLERK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        public_metadata: {
-          [key]: data,
-        },
-      }),
-    });
+    const { key, data } = await req.json();
 
-    if (!response.ok) {
-      throw new Error('Failed to update user metadata');
+    if (!key || data === undefined) {
+      return NextResponse.json({ error: 'Missing key or data in request body' }, { status: 400 });
+    }
+
+    // Prepare data object for upsert
+    const updateData = {
+        user_id: session.userId,
+        [key]: data
+    };
+
+    // Upsert data into Supabase (insert if user_id doesn't exist, update if it does)
+    console.log(`Upserting data into Supabase for user ${session.userId}, key: ${key}`);
+    console.log('Upsert data:', JSON.stringify(updateData));
+
+    const { error } = await supabase
+      .from('user_data') // Your Supabase table name
+      .upsert([updateData], { // Upsert based on user_id
+          onConflict: 'user_id'
+      });
+
+    if (error) {
+      console.error('Error upserting data into Supabase:', error);
+      throw new Error('Failed to upsert data into Supabase');
     }
 
     return NextResponse.json({ success: true });
+
   } catch (error) {
-    console.error('Error updating synced data:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    console.error('Error in POST /api/sync:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 } 

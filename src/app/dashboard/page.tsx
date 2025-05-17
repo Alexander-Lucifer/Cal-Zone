@@ -1,250 +1,238 @@
 'use client';
 
 import { useUser } from "@clerk/nextjs";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { DashboardNavbar } from "@/components/navbar/dashboard-navbar";
-import { useState } from "react";
-import { CircularProgress, StreakOrbs } from "@/components/dashboard/progress-cards";
-import { LogMealModal, MealData } from "@/components/dashboard/log-meal-modal";
-import { ConfettiBurst } from "@/components/effects/confetti-burst";
-import { toast } from "sonner";
-import { useSyncedData, UserSettings, StreakData } from "@/lib/sync";
+import { useState, useEffect } from "react";
+import { CircularProgress } from "@/components/dashboard/progress-cards";
+import { LogMealModal } from "@/components/dashboard/log-meal-modal";
+import { useSyncedData, MealData } from "@/lib/sync";
+import { v4 as uuidv4 } from 'uuid';
+import { addDays, isSameDay, startOfToday } from 'date-fns';
+import { Confetti } from '@/components/confetti';
 
 export default function DashboardPage() {
   const { user } = useUser();
+  const { syncedData, updateSyncedData, isLoading, error } = useSyncedData();
   const [isLogMealModalOpen, setIsLogMealModalOpen] = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [goalsAchieved, setGoalsAchieved] = useState(0);
+  const [isConfettiActive, setIsConfettiActive] = useState(false);
 
-  // Use synced data hooks
-  const { data: settings } = useSyncedData<UserSettings>('userSettings', {
-    nickname: '',
-    dailyCalorieGoal: 2000,
-    streakGoal: 7,
-  });
+  // Destructure data from syncedData for easier access
+  const { settings, meals, streak, goalsAchieved } = syncedData;
+  const { nickname, dailyCalorieGoal, streakGoal } = settings;
+  const { lastLogDate, currentStreak, longestStreak } = streak;
 
-  const { data: meals, updateData: updateMeals } = useSyncedData<MealData[]>('meals', []);
-  const { data: streakData, updateData: updateStreakData } = useSyncedData<StreakData>('streakData', {
-    lastGoalMet: '',
-    currentStreak: 0,
-  });
+  const [currentCalorieIntake, setCurrentCalorieIntake] = useState(0);
 
-  const { data: goalsAchievedData, updateData: updateGoalsAchieved } = useSyncedData<string[]>('goalsAchieved', []);
+  // Calculate current calorie intake whenever meals change
+  useEffect(() => {
+    const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
+    setCurrentCalorieIntake(totalCalories);
+  }, [meals]);
 
-  // Calculate current calories
-  const currentCalories = meals.reduce((sum: number, meal: MealData) => sum + meal.calories, 0);
+  // Streak logic
+  useEffect(() => {
+    if (currentCalorieIntake >= dailyCalorieGoal) {
+      const today = startOfToday();
+      const lastLog = lastLogDate ? new Date(lastLogDate) : null;
 
-  const updateStreak = (newCalories: number) => {
-    const today = new Date().toISOString().split('T')[0];
+      if (!lastLog || !isSameDay(lastLog, today)) {
+        // Check if it's the day after the last log to continue streak
+        const yesterday = addDays(today, -1);
+        const newStreak = (lastLog && isSameDay(lastLog, yesterday)) ? currentStreak + 1 : 1;
 
-    // Check if we've already met the goal today
-    if (streakData.lastGoalMet === today) {
-      return;
-    }
+        updateSyncedData('streak', {
+          lastLogDate: today.toISOString(),
+          currentStreak: newStreak,
+          longestStreak: Math.max(longestStreak, newStreak),
+        });
 
-    // If calories meet or exceed the goal
-    if (newCalories >= settings.dailyCalorieGoal) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-      const newStreakData: StreakData = {
-        lastGoalMet: today,
-        currentStreak: streakData.lastGoalMet === yesterdayStr ? streakData.currentStreak + 1 : 1,
-      };
-
-      updateStreakData(newStreakData);
-
-      // Update goals achieved
-      if (!goalsAchievedData.includes(today)) {
-        const newGoalsAchieved = [...goalsAchievedData, today];
-        updateGoalsAchieved(newGoalsAchieved);
-        setGoalsAchieved(newGoalsAchieved.length);
-      }
-
-      // Show confetti and achievement toast
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 3000);
-
-      if (newStreakData.currentStreak > 1) {
-        toast.success(`🔥 ${newStreakData.currentStreak} day streak! Keep it up!`);
-      } else {
-        toast.success('🎯 Daily goal achieved!');
+        // Check for streak goals achieved
+        if (newStreak >= streakGoal && goalsAchieved < streakGoal) {
+          setIsConfettiActive(true);
+          updateSyncedData('goalsAchieved', goalsAchieved + 1);
+        }
       }
     }
+    // Reset confetti after animation
+    if (isConfettiActive) {
+      const timer = setTimeout(() => setIsConfettiActive(false), 5000); // Adjust time as needed
+      return () => clearTimeout(timer);
+    }
+  }, [currentCalorieIntake, dailyCalorieGoal, lastLogDate, currentStreak, longestStreak, streakGoal, goalsAchieved, updateSyncedData, isConfettiActive]);
+
+  const handleLogMeal = (mealName: string, calories: number) => {
+    const newMeal: MealData = {
+      id: uuidv4(),
+      name: mealName,
+      calories: calories,
+      timestamp: Date.now(),
+    };
+    const updatedMeals = [...meals, newMeal];
+    updateSyncedData('meals', updatedMeals);
+    setIsLogMealModalOpen(false);
   };
 
-  const handleLogMeal = (mealData: MealData) => {
-    const updatedMeals = [...meals, mealData];
-    updateMeals(updatedMeals);
-    
-    // Update calories and check streak
-    const newTotalCalories = currentCalories + mealData.calories;
-    updateStreak(newTotalCalories);
-    
-    // Show success message
-    toast.success('Meal logged successfully!');
-  };
-
-  // Helper to get greeting based on time
-  function getGreeting() {
+  // Determine greeting and motivational quote based on time of day
+  const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return 'Good morning';
-    if (hour >= 12 && hour < 17) return 'Good afternoon';
-    if (hour >= 17 && hour < 21) return 'Good evening';
-    return 'Good night';
-  }
+    if (hour < 12) return 'Good Morning';
+    if (hour < 18) return 'Good Afternoon';
+    return 'Good Evening';
+  };
 
-  // Motivational quotes for the morning
-  const morningQuotes = [
-    "Rise and shine! Today is full of possibilities.",
-    "Every morning is a new beginning.",
-    "Start your day with a smile and positive thoughts.",
-    "You are capable of amazing things!",
-    "Make today count!",
-    "Small steps every day lead to big results.",
-    "Your only limit is your mind."
+  const motivationalQuotes = [
+    'Fuel your body, empower your mind.',
+    'Every meal is a step towards a healthier you.',
+    'Consistency is key. Keep tracking!',
+    'Small changes lead to big results.',
+    'Nourish to flourish.',
   ];
 
-  // Deterministic random quote per user per day
-  function getDailyQuote() {
-    const today = new Date().toISOString().split('T')[0];
-    const userKey = (settings.nickname || user?.firstName || 'User') + today;
-    // Simple hash function
-    let hash = 0;
-    for (let i = 0; i < userKey.length; i++) {
-      hash = ((hash << 5) - hash) + userKey.charCodeAt(i);
-      hash |= 0;
-    }
-    const idx = Math.abs(hash) % morningQuotes.length;
-    return morningQuotes[idx];
+  const getMotivationalQuote = () => {
+    const today = new Date();
+    const quoteIndex = today.getDate() % motivationalQuotes.length;
+    return motivationalQuotes[quoteIndex];
+  };
+
+  if (isLoading) {
+    return <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black flex items-center justify-center"><p className="text-white">Loading dashboard...</p></div>; // Loading state
+  }
+
+  if (error) {
+    return <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black flex items-center justify-center text-red-400">Error loading dashboard: {error.message}</div>; // Error state
   }
 
   return (
     <>
+      {isConfettiActive && <Confetti />} {/* Confetti component */}
       <DashboardNavbar />
-      <main className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black pt-20 p-8">
-        <div className="container mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="space-y-8"
-          >
-            <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
-              {getGreeting()}, {settings.nickname || user?.firstName || 'User'}!
-            </h1>
-            {getGreeting() === 'Good morning' && (
-              <div className="mt-2 text-lg text-blue-200 italic animate-fade-in">
-                {getDailyQuote()}
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* Quick Stats */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
-              >
-                <h2 className="text-xl font-semibold mb-4 text-blue-400">Today&apos;s Overview</h2>
-                <div className="flex flex-col items-center space-y-6">
-                  <CircularProgress
-                    current={currentCalories}
-                    goal={settings.dailyCalorieGoal}
-                    size={160}
-                  />
-                  <div className="w-full space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-400">Meals Tracked</span>
-                      <span className="text-white">{meals.length}</span>
-                    </div>
-                  </div>
+      <AnimatePresence mode="wait">
+        <motion.main
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black pt-20 p-8"
+        >
+          <div className="container mx-auto">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="space-y-8"
+            >
+              <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+                {getGreeting()}, {nickname || user?.firstName || 'User'}!
+              </h1>
+              {getGreeting() === 'Good Morning' && (
+                <div className="mt-2 text-lg text-blue-200 italic animate-fade-in">
+                  {getMotivationalQuote()}
                 </div>
-              </motion.div>
-
-              {/* Quick Actions */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
-              >
-                <h2 className="text-xl font-semibold mb-4 text-blue-400">Quick Actions</h2>
-                <div className="space-y-4">
-                  <button
-                    onClick={() => setIsLogMealModalOpen(true)}
-                    className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
-                  >
-                    Log a Meal
-                  </button>
-                  <button className="w-full px-4 py-2 border border-gray-600 rounded-lg text-white font-medium hover:bg-gray-800 transition-colors">
-                    View History
-                  </button>
-                </div>
-              </motion.div>
-
-              {/* Progress */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-                className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
-              >
-                <h2 className="text-xl font-semibold mb-4 text-blue-400">Your Progress</h2>
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-400">Weekly Streak</span>
-                      <span className="text-white">{streakData.currentStreak} / {settings.streakGoal} days</span>
-                    </div>
-                    <StreakOrbs currentStreak={streakData.currentStreak} goal={settings.streakGoal} />
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400">Goals Achieved</span>
-                    <span className="text-white">{goalsAchieved}</span>
-                  </div>
-                </div>
-              </motion.div>
-            </div>
-
-            {/* Recent Meals */}
-            {meals.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 }}
-                className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
-              >
-                <h2 className="text-xl font-semibold mb-4 text-blue-400">Recent Meals</h2>
-                <div className="space-y-4">
-                  {meals.slice(-3).reverse().map((meal: MealData, index: number) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700"
-                    >
-                      <div>
-                        <h3 className="text-white font-medium">{meal.name}</h3>
-                        <p className="text-sm text-gray-400">{meal.type} &apos; {meal.time}</p>
+              )}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Quick Stats */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
+                >
+                  <h2 className="text-xl font-semibold mb-4 text-blue-400">Today&apos;s Overview</h2>
+                  <div className="flex flex-col items-center space-y-6">
+                    <CircularProgress
+                      current={currentCalorieIntake}
+                      goal={dailyCalorieGoal}
+                      size={160}
+                    />
+                    <div className="w-full space-y-4">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400">Calories Consumed</span>
+                        <span className="text-white">{Math.round(currentCalorieIntake)} / {dailyCalorieGoal} kcal</span>
                       </div>
-                      <span className="text-white font-medium">{meal.calories} cal</span>
                     </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </motion.div>
-        </div>
-      </main>
+                  </div>
+                </motion.div>
+
+                {/* Quick Actions */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
+                >
+                  <h2 className="text-xl font-semibold mb-4 text-blue-400">Quick Actions</h2>
+                  <div className="space-y-4">
+                    <button
+                      onClick={() => setIsLogMealModalOpen(true)}
+                      className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+                    >
+                      Log a Meal
+                    </button>
+                    <button className="w-full px-4 py-2 border border-gray-600 rounded-lg text-white font-medium hover:bg-gray-800 transition-colors">
+                      View History
+                    </button>
+                  </div>
+                </motion.div>
+
+                {/* Progress */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
+                >
+                  <h2 className="text-xl font-semibold mb-4 text-blue-400">Your Progress</h2>
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400">Current Streak</span>
+                        <span className="text-white">{currentStreak} days</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400">Longest Streak</span>
+                        <span className="text-white">{longestStreak} days</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+
+              {/* Recent Meals */}
+              {meals.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                  className="p-6 rounded-xl bg-gray-800/50 backdrop-blur-sm border border-gray-700"
+                >
+                  <h2 className="text-xl font-semibold mb-4 text-blue-400">Recent Meals</h2>
+                  <div className="space-y-4">
+                    {meals.slice(-3).reverse().map((meal: MealData, index: number) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700"
+                      >
+                        <div>
+                          <h3 className="text-white font-medium">{meal.name}</h3>
+                          <p className="text-sm text-gray-400">{new Date(meal.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                        </div>
+                        <span className="text-white font-medium">{meal.calories} kcal</span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+          </div>
+        </motion.main>
+      </AnimatePresence>
 
       <LogMealModal
         isOpen={isLogMealModalOpen}
         onClose={() => setIsLogMealModalOpen(false)}
-        onLogMeal={handleLogMeal}
+        onLogMeal={(mealData) => handleLogMeal(mealData.name, mealData.calories)}
       />
-
-      {showConfetti && <ConfettiBurst />}
     </>
   );
 } 

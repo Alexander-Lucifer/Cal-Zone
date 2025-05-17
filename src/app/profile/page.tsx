@@ -1,33 +1,37 @@
 'use client';
 
-// import { useUser } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import { DashboardNavbar } from "@/components/navbar/dashboard-navbar";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { useSyncedData, UserSettings } from "@/lib/sync";
+import { useSyncedData } from "@/lib/sync";
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { syncedData, updateSyncedData, isLoading } = useSyncedData();
   const [isSaving, setIsSaving] = useState(false);
-
-  const { data: settings, updateData: updateSettings, isLoading } = useSyncedData<UserSettings>('userSettings', {
-    nickname: '',
-    dailyCalorieGoal: 2000,
-    streakGoal: 7,
-  });
 
   const handleSave = async () => {
     setIsSaving(true);
-    await updateSettings(settings);
-    toast.success('Settings saved successfully!');
-    
-    // Wait for the toast to be visible
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Animate out and redirect
-    router.push('/dashboard');
+    try {
+      await updateSyncedData('settings', {
+        nickname: syncedData.settings.nickname,
+        dailyCalorieGoal: syncedData.settings.dailyCalorieGoal,
+        streakGoal: syncedData.settings.streakGoal,
+      });
+      toast.success('Profile updated successfully!');
+      
+      // Wait for the toast to be visible
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Animate out and redirect
+      router.push('/dashboard');
+    } catch {
+      toast.error('Failed to update profile');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (isLoading) {
@@ -83,8 +87,8 @@ export default function ProfilePage() {
                       </label>
                       <input
                         type="text"
-                        value={settings.nickname}
-                        onChange={(e) => updateSettings({ ...settings, nickname: e.target.value })}
+                        value={syncedData.settings.nickname}
+                        onChange={(e) => updateSyncedData('settings', { ...syncedData.settings, nickname: e.target.value })}
                         placeholder="Enter your nickname"
                         className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
@@ -107,8 +111,8 @@ export default function ProfilePage() {
                       </label>
                       <input
                         type="number"
-                        value={settings.dailyCalorieGoal}
-                        onChange={(e) => updateSettings({ ...settings, dailyCalorieGoal: parseInt(e.target.value) })}
+                        value={syncedData.settings.dailyCalorieGoal}
+                        onChange={(e) => updateSyncedData('settings', { ...syncedData.settings, dailyCalorieGoal: parseInt(e.target.value) })}
                         min="500"
                         max="10000"
                         step="100"
@@ -121,8 +125,8 @@ export default function ProfilePage() {
                       </label>
                       <input
                         type="number"
-                        value={settings.streakGoal}
-                        onChange={(e) => updateSettings({ ...settings, streakGoal: parseInt(e.target.value) })}
+                        value={syncedData.settings.streakGoal}
+                        onChange={(e) => updateSyncedData('settings', { ...syncedData.settings, streakGoal: parseInt(e.target.value) })}
                         min="1"
                         max="365"
                         className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"

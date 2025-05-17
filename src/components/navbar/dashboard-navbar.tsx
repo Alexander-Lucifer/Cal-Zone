@@ -92,11 +92,11 @@ export function DashboardNavbar() {
                   <button
                     onClick={() => {
                       setIsMenuOpen(false);
-                      router.push('/settings');
+                      router.push('/subscriptions');
                     }}
                     className="w-full px-4 py-2 text-left text-white hover:bg-gray-800 rounded-lg transition-colors"
                   >
-                    Settings
+                    Subscriptions
                   </button>
                   <button
                     onClick={handleSignOut}

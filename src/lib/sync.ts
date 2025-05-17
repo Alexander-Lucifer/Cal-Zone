@@ -1,5 +1,5 @@
 import { useUser } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 export interface UserSettings {
   nickname: string;
@@ -8,16 +8,46 @@ export interface UserSettings {
 }
 
 export interface StreakData {
-  lastGoalMet: string; // ISO date string
+  lastLogDate: string | null;
   currentStreak: number;
+  longestStreak: number;
 }
 
 export interface MealData {
+  id: string;
   name: string;
   calories: number;
-  time: string;
-  type: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  timestamp: number;
 }
+
+interface SyncedData {
+  settings: UserSettings;
+  meals: MealData[];
+  streak: StreakData;
+  goalsAchieved: number; // New field for goals achieved count
+}
+
+const DEFAULT_SETTINGS: UserSettings = {
+  nickname: '',
+  dailyCalorieGoal: 2000,
+  streakGoal: 7,
+};
+
+const DEFAULT_STREAK_DATA: StreakData = {
+  lastLogDate: null,
+  currentStreak: 0,
+  longestStreak: 0,
+};
+
+const DEFAULT_SYNCED_DATA: SyncedData = {
+    settings: DEFAULT_SETTINGS,
+    meals: [],
+    streak: DEFAULT_STREAK_DATA,
+    goalsAchieved: 0,
+};
+
+// Helper to get Supabase column keys
+type SyncedDataKeys = keyof SyncedData;
 
 // Helper to get a user-specific key
 export const getKey = (userId: string, base: string) => `${base}_${userId}`;
@@ -48,62 +78,115 @@ export async function syncWithClerk<T>(userId: string, key: string, data: T) {
   }
 }
 
-// Hook to manage synced data
-export function useSyncedData<T>(key: string, initialValue: T) {
+export function useSyncedData() {
   const { user } = useUser();
-  const [data, setData] = useState<T>(initialValue);
+  const userId = user?.id;
+
+  const [syncedData, setSyncedData] = useState<SyncedData>(DEFAULT_SYNCED_DATA);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
+  // Function to fetch data for a specific key
+  const fetchData = useCallback(async (key: SyncedDataKeys): Promise<SyncedData[SyncedDataKeys] | null> => {
+    if (!userId) return null;
 
-    const userId = user.id;
-    const storageKey = getKey(userId, key);
+    try {
+      console.log(`Fetching key ${key} for user ${userId}`);
+      const response = await fetch(`/api/sync?userId=${userId}&key=${key}`);
 
-    // Load from localStorage first for immediate access
-    const localData = localStorage.getItem(storageKey);
-    if (localData) {
-      setData(JSON.parse(localData));
-    }
-
-    // Then sync with Clerk
-    const syncData = async () => {
-      try {
-        const response = await fetch(`/api/sync?userId=${userId}&key=${key}`);
-        if (response.ok) {
-          const { data: syncedData } = await response.json();
-          if (syncedData) {
-            setData(syncedData);
-            localStorage.setItem(storageKey, JSON.stringify(syncedData));
-          }
+      if (!response.ok) {
+        console.error(`Failed to fetch ${key}:`, response.status);
+        if (response.status === 404) {
+          return null;
         }
-      } catch (error) {
-        console.error('Error syncing data:', error);
+        throw new Error(`Failed to fetch ${key}: Status ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(`Fetched ${key}:`, data);
+      return data;
+
+    } catch (err) {
+      console.error(`Error fetching ${key}:`, err);
+      setError(err instanceof Error ? err : new Error('Unknown error occurred'));
+      return null;
+    }
+  }, [userId]);
+
+  // Function to sync data for a specific key
+  const syncKey = useCallback(async (key: SyncedDataKeys, data: SyncedData[SyncedDataKeys]) => {
+    if (!userId) return;
+
+    try {
+      console.log(`Syncing key ${key} for user ${userId}`);
+      const response = await fetch('/api/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId, key, data }),
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to sync ${key}:`, response.status);
+        throw new Error(`Failed to sync ${key}: Status ${response.status}`);
+      }
+      console.log(`Successfully synced ${key}`);
+    } catch (err) {
+      console.error(`Error syncing ${key}:`, err);
+      setError(err instanceof Error ? err : new Error('Unknown error occurred'));
+    }
+  }, [userId]);
+
+  // Effect to load data from Supabase on mount
+  useEffect(() => {
+    const loadData = async () => {
+      if (!userId) {
+          setIsLoading(false);
+          return;
+      }
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Fetch all keys in parallel
+        const [settings, meals, streak, goalsAchieved] = await Promise.all([
+          fetchData('settings') as Promise<UserSettings | null>,
+          fetchData('meals') as Promise<MealData[] | null>,
+          fetchData('streak') as Promise<StreakData | null>,
+          fetchData('goalsAchieved') as Promise<number | null>,
+        ]);
+
+        setSyncedData({
+          settings: settings || DEFAULT_SETTINGS,
+          meals: meals || [],
+          streak: streak || DEFAULT_STREAK_DATA,
+          goalsAchieved: goalsAchieved || 0,
+        });
+
+      } catch {
+        // Error is already set in fetchData
       } finally {
         setIsLoading(false);
       }
     };
 
-    syncData();
-  }, [user, key]);
+    loadData();
+  }, [userId, fetchData]); // Depend on userId and fetchData
 
-  const updateData = async (newData: T) => {
-    if (!user) return;
+  // Function to update and sync data for a specific key
+  const updateSyncedData = useCallback(async <K extends SyncedDataKeys>(key: K, data: SyncedData[K]) => {
+      setSyncedData(prevData => ({
+          ...prevData,
+          [key]: data,
+      }));
+      await syncKey(key, data);
+  }, [syncKey]);
 
-    const userId = user.id;
-    const storageKey = getKey(userId, key);
-
-    // Update local state and localStorage
-    setData(newData);
-    localStorage.setItem(storageKey, JSON.stringify(newData));
-
-    // Sync with Clerk
-    try {
-      await syncWithClerk(userId, key, newData);
-    } catch (error) {
-      console.error('Error updating synced data:', error);
-    }
+  return {
+    syncedData,
+    updateSyncedData,
+    isLoading,
+    error,
   };
-
-  return { data, updateData, isLoading };
 } 
