@@ -142,6 +142,7 @@ export function useSyncedData() {
   // Effect to load data from Supabase on mount and poll for updates
   useEffect(() => {
     let isMounted = true;
+    let lastData: string | null = null;
 
     const loadData = async () => {
       if (!userId) {
@@ -164,12 +165,19 @@ export function useSyncedData() {
         ]);
 
         if (isMounted) {
-          setSyncedData({
+          const newData = {
             settings: settings || DEFAULT_SETTINGS,
             meals: meals || [],
             streak: streak || DEFAULT_STREAK_DATA,
             goalsAchieved: goalsAchieved || 0,
-          });
+          };
+
+          // Only update if data has changed
+          const newDataString = JSON.stringify(newData);
+          if (newDataString !== lastData) {
+            lastData = newDataString;
+            setSyncedData(newData);
+          }
         }
       } catch (err) {
         if (isMounted) {
@@ -185,8 +193,8 @@ export function useSyncedData() {
     // Initial load
     loadData();
 
-    // Set up polling every 5 seconds
-    const pollInterval: NodeJS.Timeout = setInterval(loadData, 5000);
+    // Set up polling every 30 seconds
+    const pollInterval: NodeJS.Timeout = setInterval(loadData, 30000);
 
     // Cleanup
     return () => {
