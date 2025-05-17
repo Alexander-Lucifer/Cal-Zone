@@ -24,15 +24,24 @@ export async function GET(req: NextRequest) {
     // Fetch data from Supabase for the specific user and key
     console.log(`Fetching data from Supabase for user ${session.userId}, key: ${key}`);
 
+    // For goalsAchieved, we need to use the correct column name
+    const columnName = key === 'goalsAchieved' ? 'goals_achieved' : key;
+
     const { data, error } = await supabase
       .from('user_data') // Your Supabase table name
-      .select(key)       // Select the specific column
+      .select(columnName)       // Select the specific column
       .eq('user_id', session.userId) // Filter by Clerk user ID
       .single(); // Expecting a single row
 
     if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found (which is okay if it's a new user)
       console.error('Error fetching data from Supabase:', error);
       throw new Error('Failed to fetch data from Supabase');
+    }
+
+    // For goalsAchieved, we need to map the column name back
+    if (key === 'goalsAchieved') {
+      const typedData = data as unknown as { goals_achieved: number } | null;
+      return NextResponse.json(typedData?.goals_achieved || 0);
     }
 
     // Return the value of the specific key, or null if no data was found
@@ -58,31 +67,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing key or data in request body' }, { status: 400 });
     }
 
-    // Prepare data object for upsert
-    const updateData = {
+    // First, get the current data for the user
+    const columnName = key === 'goalsAchieved' ? 'goals_achieved' : key;
+    const { data: currentData, error: fetchError } = await supabase
+      .from('user_data')
+      .select(columnName)
+      .eq('user_id', session.userId)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error fetching current data:', fetchError);
+      throw new Error('Failed to fetch current data');
+    }
+
+    // Prepare the update data
+    let updateData;
+    if (key === 'meals') {
+      // For meals, we need to handle the array properly
+      const currentMeals = currentData?.[columnName] || [];
+      const newMeals = [...currentMeals, data];
+      console.log('Current meals:', currentMeals);
+      console.log('New meal:', data);
+      console.log('Updated meals array:', newMeals);
+      
+      updateData = {
         user_id: session.userId,
-        [key]: data
-    };
+        [columnName]: newMeals
+      };
+    } else {
+      // For other fields, just update directly
+      updateData = {
+        user_id: session.userId,
+        [columnName]: data
+      };
+    }
 
-    // Upsert data into Supabase (insert if user_id doesn't exist, update if it does)
-    console.log(`Upserting data into Supabase for user ${session.userId}, key: ${key}`);
-    console.log('Upsert data:', JSON.stringify(updateData));
+    console.log(`Upserting data into Supabase for user ${session.userId}, key: ${columnName}`);
+    console.log('Upsert data:', JSON.stringify(updateData, null, 2));
 
-    const { error } = await supabase
-      .from('user_data') // Your Supabase table name
-      .upsert([updateData], { // Upsert based on user_id
-          onConflict: 'user_id'
-      });
+    // Try to insert first
+    const { error: insertError } = await supabase
+      .from('user_data')
+      .insert([updateData]);
 
-    if (error) {
-      console.error('Error upserting data into Supabase:', error);
-      throw new Error('Failed to upsert data into Supabase');
+    // If insert fails, try update
+    if (insertError) {
+      console.log('Insert failed, trying update:', insertError);
+      const { error: updateError } = await supabase
+        .from('user_data')
+        .update({ [columnName]: updateData[columnName] })
+        .eq('user_id', session.userId);
+
+      if (updateError) {
+        console.error('Error updating data in Supabase:', updateError);
+        throw new Error(`Failed to update data in Supabase: ${updateError.message}`);
+      }
     }
 
     return NextResponse.json({ success: true });
 
   } catch (error) {
     console.error('Error in POST /api/sync:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ 
+      error: 'Internal Server Error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 } 
