@@ -7,7 +7,6 @@ import { useState, useEffect } from "react";
 import { CircularProgress } from "@/components/dashboard/progress-cards";
 import { LogMealModal } from "@/components/dashboard/log-meal-modal";
 import { useSyncedData, MealData } from "@/lib/sync";
-import { v4 as uuidv4 } from 'uuid';
 import { addDays, isSameDay, startOfToday } from 'date-fns';
 import { Confetti } from '@/components/confetti';
 
@@ -61,14 +60,8 @@ export default function DashboardPage() {
     }
   }, [currentCalorieIntake, dailyCalorieGoal, lastLogDate, currentStreak, longestStreak, streakGoal, goalsAchieved, updateSyncedData, isConfettiActive]);
 
-  const handleLogMeal = (mealName: string, calories: number) => {
-    const newMeal: MealData = {
-      id: uuidv4(),
-      name: mealName,
-      calories: calories,
-      timestamp: Date.now(),
-    };
-    const updatedMeals = [...meals, newMeal];
+  const handleLogMeal = (mealData: MealData) => {
+    const updatedMeals = [...meals, mealData];
     updateSyncedData('meals', updatedMeals);
     setIsLogMealModalOpen(false);
   };
@@ -231,7 +224,7 @@ export default function DashboardPage() {
       <LogMealModal
         isOpen={isLogMealModalOpen}
         onClose={() => setIsLogMealModalOpen(false)}
-        onLogMeal={(mealData) => handleLogMeal(mealData.name, mealData.calories)}
+        onLogMeal={(mealData) => handleLogMeal(mealData)}
       />
     </>
   );
