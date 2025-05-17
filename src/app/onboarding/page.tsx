@@ -1,22 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useSyncedData, UserSettings } from "@/lib/sync";
 
 export default function OnboardingPage() {
-  const { user } = useUser();
   const router = useRouter();
-  const userId = user?.id || "guest";
-  const getKey = (base: string) => `${base}_${userId}`;
-
-  // Step state
   const [step, setStep] = useState(0);
-  const [nickname, setNickname] = useState("");
-  const [calorieGoal, setCalorieGoal] = useState(2000);
-  const [streakGoal, setStreakGoal] = useState(7);
   const [loading, setLoading] = useState(false);
+
+  const { data: settings, updateData: updateSettings } = useSyncedData<UserSettings>('userSettings', {
+    nickname: '',
+    dailyCalorieGoal: 2000,
+    streakGoal: 7,
+  });
 
   const steps = [
     {
@@ -25,12 +23,12 @@ export default function OnboardingPage() {
         <input
           className="w-full p-3 rounded-lg border border-gray-700 bg-gray-900 text-white focus:outline-none focus:border-blue-500"
           placeholder="e.g. Alex"
-          value={nickname}
-          onChange={e => setNickname(e.target.value)}
+          value={settings.nickname}
+          onChange={e => updateSettings({ ...settings, nickname: e.target.value })}
           autoFocus
         />
       ),
-      canContinue: nickname.trim().length > 0,
+      canContinue: settings.nickname.trim().length > 0,
     },
     {
       label: "What's your daily calorie goal?",
@@ -38,14 +36,14 @@ export default function OnboardingPage() {
         <input
           type="number"
           className="w-full p-3 rounded-lg border border-gray-700 bg-gray-900 text-white focus:outline-none focus:border-blue-500"
-          value={calorieGoal}
+          value={settings.dailyCalorieGoal}
           min={1000}
           max={5000}
           step={50}
-          onChange={e => setCalorieGoal(Number(e.target.value))}
+          onChange={e => updateSettings({ ...settings, dailyCalorieGoal: Number(e.target.value) })}
         />
       ),
-      canContinue: calorieGoal >= 1000 && calorieGoal <= 5000,
+      canContinue: settings.dailyCalorieGoal >= 1000 && settings.dailyCalorieGoal <= 5000,
     },
     {
       label: "What's your streak goal?",
@@ -53,14 +51,14 @@ export default function OnboardingPage() {
         <input
           type="number"
           className="w-full p-3 rounded-lg border border-gray-700 bg-gray-900 text-white focus:outline-none focus:border-blue-500"
-          value={streakGoal}
+          value={settings.streakGoal}
           min={3}
           max={30}
           step={1}
-          onChange={e => setStreakGoal(Number(e.target.value))}
+          onChange={e => updateSettings({ ...settings, streakGoal: Number(e.target.value) })}
         />
       ),
-      canContinue: streakGoal >= 3 && streakGoal <= 30,
+      canContinue: settings.streakGoal >= 3 && settings.streakGoal <= 30,
     },
   ];
 
@@ -69,14 +67,7 @@ export default function OnboardingPage() {
       setStep(step + 1);
     } else {
       setLoading(true);
-      // Save onboarding data
-      const settings = {
-        nickname,
-        dailyCalorieGoal: calorieGoal,
-        streakGoal,
-      };
-      localStorage.setItem(getKey("userSettings"), JSON.stringify(settings));
-      localStorage.setItem(getKey("onboardingComplete"), "true");
+      await updateSettings(settings);
       setTimeout(() => {
         router.push("/dashboard");
       }, 800);
@@ -84,7 +75,7 @@ export default function OnboardingPage() {
   };
 
   // If already onboarded, redirect
-  if (typeof window !== "undefined" && localStorage.getItem(getKey("onboardingComplete"))) {
+  if (typeof window !== "undefined" && settings.nickname) {
     router.replace("/dashboard");
     return null;
   }

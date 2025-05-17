@@ -3,77 +3,39 @@
 import { useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import { DashboardNavbar } from "@/components/navbar/dashboard-navbar";
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { CircularProgress, StreakOrbs } from "@/components/dashboard/progress-cards";
 import { LogMealModal, MealData } from "@/components/dashboard/log-meal-modal";
 import { ConfettiBurst } from "@/components/effects/confetti-burst";
 import { toast } from "sonner";
-
-interface UserSettings {
-  nickname: string;
-  dailyCalorieGoal: number;
-  streakGoal: number;
-}
-
-interface StreakData {
-  lastGoalMet: string; // ISO date string
-  currentStreak: number;
-}
+import { useSyncedData, UserSettings, StreakData } from "@/lib/sync";
 
 export default function DashboardPage() {
   const { user } = useUser();
-  const [settings, setSettings] = useState<UserSettings>({
+  const [isLogMealModalOpen, setIsLogMealModalOpen] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [goalsAchieved, setGoalsAchieved] = useState(0);
+
+  // Use synced data hooks
+  const { data: settings } = useSyncedData<UserSettings>('userSettings', {
     nickname: '',
     dailyCalorieGoal: 2000,
     streakGoal: 7,
   });
-  const [currentCalories, setCurrentCalories] = useState(0);
-  const [currentStreak, setCurrentStreak] = useState(0);
-  const [isLogMealModalOpen, setIsLogMealModalOpen] = useState(false);
-  const [meals, setMeals] = useState<MealData[]>([]);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [goalsAchieved, setGoalsAchieved] = useState(0);
 
-  // Helper to get a user-specific key
-  const userId = user?.id || 'guest';
-  const getKey = useCallback((base: string) => `${base}_${userId}`, [userId]);
+  const { data: meals, updateData: updateMeals } = useSyncedData<MealData[]>('meals', []);
+  const { data: streakData, updateData: updateStreakData } = useSyncedData<StreakData>('streakData', {
+    lastGoalMet: '',
+    currentStreak: 0,
+  });
 
-  useEffect(() => {
-    // Load user settings from localStorage
-    const savedSettings = localStorage.getItem(getKey('userSettings'));
-    if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
-    }
+  const { data: goalsAchievedData, updateData: updateGoalsAchieved } = useSyncedData<string[]>('goalsAchieved', []);
 
-    // Load meals from localStorage
-    const savedMeals = localStorage.getItem(getKey('meals'));
-    if (savedMeals) {
-      const parsedMeals = JSON.parse(savedMeals);
-      setMeals(parsedMeals);
-      // Calculate total calories
-      const totalCalories = parsedMeals.reduce((sum: number, meal: MealData) => sum + meal.calories, 0);
-      setCurrentCalories(totalCalories);
-    }
-
-    // Load streak data
-    const savedStreak = localStorage.getItem(getKey('streakData'));
-    if (savedStreak) {
-      const streakData: StreakData = JSON.parse(savedStreak);
-      setCurrentStreak(streakData.currentStreak);
-    }
-
-    // Load goals achieved
-    const savedGoals = localStorage.getItem(getKey('goalsAchieved'));
-    if (savedGoals) {
-      const goalsArr = JSON.parse(savedGoals);
-      setGoalsAchieved(goalsArr.length);
-    }
-  }, [getKey]);
+  // Calculate current calories
+  const currentCalories = meals.reduce((sum: number, meal: MealData) => sum + meal.calories, 0);
 
   const updateStreak = (newCalories: number) => {
     const today = new Date().toISOString().split('T')[0];
-    const savedStreak = localStorage.getItem(getKey('streakData'));
-    const streakData: StreakData = savedStreak ? JSON.parse(savedStreak) : { lastGoalMet: '', currentStreak: 0 };
 
     // Check if we've already met the goal today
     if (streakData.lastGoalMet === today) {
@@ -86,36 +48,26 @@ export default function DashboardPage() {
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toISOString().split('T')[0];
 
-      // If the last goal was met yesterday, increment streak
-      if (streakData.lastGoalMet === yesterdayStr) {
-        streakData.currentStreak += 1;
-      } else {
-        // If it's been more than a day, reset streak to 1
-        streakData.currentStreak = 1;
-      }
+      const newStreakData: StreakData = {
+        lastGoalMet: today,
+        currentStreak: streakData.lastGoalMet === yesterdayStr ? streakData.currentStreak + 1 : 1,
+      };
 
-      streakData.lastGoalMet = today;
-      setCurrentStreak(streakData.currentStreak);
-      localStorage.setItem(getKey('streakData'), JSON.stringify(streakData));
+      updateStreakData(newStreakData);
 
       // Update goals achieved
-      let goalsArr: string[] = [];
-      const savedGoals = localStorage.getItem(getKey('goalsAchieved'));
-      if (savedGoals) {
-        goalsArr = JSON.parse(savedGoals);
-      }
-      if (!goalsArr.includes(today)) {
-        goalsArr.push(today);
-        localStorage.setItem(getKey('goalsAchieved'), JSON.stringify(goalsArr));
-        setGoalsAchieved(goalsArr.length);
+      if (!goalsAchievedData.includes(today)) {
+        const newGoalsAchieved = [...goalsAchievedData, today];
+        updateGoalsAchieved(newGoalsAchieved);
+        setGoalsAchieved(newGoalsAchieved.length);
       }
 
       // Show confetti and achievement toast
       setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 3000); // Hide confetti after 3 seconds
+      setTimeout(() => setShowConfetti(false), 3000);
 
-      if (streakData.currentStreak > 1) {
-        toast.success(`🔥 ${streakData.currentStreak} day streak! Keep it up!`);
+      if (newStreakData.currentStreak > 1) {
+        toast.success(`🔥 ${newStreakData.currentStreak} day streak! Keep it up!`);
       } else {
         toast.success('🎯 Daily goal achieved!');
       }
@@ -124,14 +76,10 @@ export default function DashboardPage() {
 
   const handleLogMeal = (mealData: MealData) => {
     const updatedMeals = [...meals, mealData];
-    setMeals(updatedMeals);
-    localStorage.setItem(getKey('meals'), JSON.stringify(updatedMeals));
+    updateMeals(updatedMeals);
     
-    // Update calories
+    // Update calories and check streak
     const newTotalCalories = currentCalories + mealData.calories;
-    setCurrentCalories(newTotalCalories);
-    
-    // Check and update streak
     updateStreak(newTotalCalories);
     
     // Show success message
@@ -157,6 +105,7 @@ export default function DashboardPage() {
     "Small steps every day lead to big results.",
     "Your only limit is your mind."
   ];
+
   // Deterministic random quote per user per day
   function getDailyQuote() {
     const today = new Date().toISOString().split('T')[0];
@@ -248,9 +197,9 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-gray-400">Weekly Streak</span>
-                      <span className="text-white">{currentStreak} / {settings.streakGoal} days</span>
+                      <span className="text-white">{streakData.currentStreak} / {settings.streakGoal} days</span>
                     </div>
-                    <StreakOrbs currentStreak={currentStreak} goal={settings.streakGoal} />
+                    <StreakOrbs currentStreak={streakData.currentStreak} goal={settings.streakGoal} />
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-400">Goals Achieved</span>
@@ -270,7 +219,7 @@ export default function DashboardPage() {
               >
                 <h2 className="text-xl font-semibold mb-4 text-blue-400">Recent Meals</h2>
                 <div className="space-y-4">
-                  {meals.slice(-3).reverse().map((meal, index) => (
+                  {meals.slice(-3).reverse().map((meal: MealData, index: number) => (
                     <div
                       key={index}
                       className="flex items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700"
@@ -295,7 +244,6 @@ export default function DashboardPage() {
         onLogMeal={handleLogMeal}
       />
 
-      {/* Show confetti only when showConfetti is true */}
       {showConfetti && <ConfettiBurst />}
     </>
   );

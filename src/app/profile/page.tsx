@@ -3,39 +3,24 @@
 // import { useUser } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import { DashboardNavbar } from "@/components/navbar/dashboard-navbar";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-
-interface UserSettings {
-  nickname: string;
-  dailyCalorieGoal: number;
-  streakGoal: number;
-}
+import { useSyncedData, UserSettings } from "@/lib/sync";
 
 export default function ProfilePage() {
   const router = useRouter();
-  const [settings, setSettings] = useState<UserSettings>({
+  const [isSaving, setIsSaving] = useState(false);
+
+  const { data: settings, updateData: updateSettings, isLoading } = useSyncedData<UserSettings>('userSettings', {
     nickname: '',
     dailyCalorieGoal: 2000,
     streakGoal: 7,
   });
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    // Load user settings from localStorage
-    const savedSettings = localStorage.getItem('userSettings');
-    if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
-    }
-    setIsLoading(false);
-  }, []);
 
   const handleSave = async () => {
     setIsSaving(true);
-    // Save settings to localStorage
-    localStorage.setItem('userSettings', JSON.stringify(settings));
+    await updateSettings(settings);
     toast.success('Settings saved successfully!');
     
     // Wait for the toast to be visible
@@ -99,7 +84,7 @@ export default function ProfilePage() {
                       <input
                         type="text"
                         value={settings.nickname}
-                        onChange={(e) => setSettings({ ...settings, nickname: e.target.value })}
+                        onChange={(e) => updateSettings({ ...settings, nickname: e.target.value })}
                         placeholder="Enter your nickname"
                         className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
@@ -123,7 +108,7 @@ export default function ProfilePage() {
                       <input
                         type="number"
                         value={settings.dailyCalorieGoal}
-                        onChange={(e) => setSettings({ ...settings, dailyCalorieGoal: parseInt(e.target.value) })}
+                        onChange={(e) => updateSettings({ ...settings, dailyCalorieGoal: parseInt(e.target.value) })}
                         min="500"
                         max="10000"
                         step="100"
@@ -137,7 +122,7 @@ export default function ProfilePage() {
                       <input
                         type="number"
                         value={settings.streakGoal}
-                        onChange={(e) => setSettings({ ...settings, streakGoal: parseInt(e.target.value) })}
+                        onChange={(e) => updateSettings({ ...settings, streakGoal: parseInt(e.target.value) })}
                         min="1"
                         max="365"
                         className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
