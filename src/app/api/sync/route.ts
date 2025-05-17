@@ -85,10 +85,10 @@ export async function POST(req: NextRequest) {
     if (key === 'meals') {
       // For meals, we need to handle the array properly
       const currentMeals = currentData?.[columnName] || [];
-      const newMeals = [...currentMeals, data];
+      // Ensure we're not duplicating meals
+      const newMeals = Array.isArray(data) ? data : [...currentMeals, data];
       console.log('Current meals:', currentMeals);
-      console.log('New meal:', data);
-      console.log('Updated meals array:', newMeals);
+      console.log('New meals:', newMeals);
       
       updateData = {
         user_id: session.userId,
@@ -108,20 +108,14 @@ export async function POST(req: NextRequest) {
     // Try to insert first
     const { error: insertError } = await supabase
       .from('user_data')
-      .insert([updateData]);
+      .upsert([updateData], {
+        onConflict: 'user_id',
+        ignoreDuplicates: false
+      });
 
-    // If insert fails, try update
     if (insertError) {
-      console.log('Insert failed, trying update:', insertError);
-      const { error: updateError } = await supabase
-        .from('user_data')
-        .update({ [columnName]: updateData[columnName] })
-        .eq('user_id', session.userId);
-
-      if (updateError) {
-        console.error('Error updating data in Supabase:', updateError);
-        throw new Error(`Failed to update data in Supabase: ${updateError.message}`);
-      }
+      console.error('Error upserting data in Supabase:', insertError);
+      throw new Error(`Failed to upsert data in Supabase: ${insertError.message}`);
     }
 
     return NextResponse.json({ success: true });
